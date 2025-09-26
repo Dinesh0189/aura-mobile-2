@@ -1,6 +1,6 @@
 // --- SCRIPT 4: GOOGLE DRIVE BACKEND INTEGRATION (Mobile-Ready) ---
 
-const GOOGLE_API_KEY = 'AIzaSyCddqKGS8YXxkxcqmoFlshfJHGAf6nIwiA';
+const GOOGLE_API_KEY = 'AIzaSyDY-GyYDfGuvN3MYUVsvKHCfuTwyZDup4c';
 const GOOGLE_CLIENT_ID = '531468994431-m602puatri7taea57ipl93pdf779pq86.apps.googleusercontent.com';
 
 const GOOGLE_DISCOVERY_DOCS = ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"];
@@ -326,4 +326,5 @@ async function downloadTrackFromCloud(track) {
         showToast(`Download failed: ${err.message}`, "error");
     }
 }
+
 
