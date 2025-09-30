@@ -89,16 +89,20 @@ async function initializeGapiClient() {
             state.googleDriveSignedIn = true;
             console.log("Restored token from localStorage.");
             
-            // Show UI immediately
-            dom.loadingOverlay.classList.add('hidden');
-            updateDriveStatus(true);
-            
-            // Perform longer sync operations in the background
-            await fetchUserProfile(); 
-            
-            if(state.googleDriveSignedIn) {
-                await loadStateFromDrive(); 
-                await syncDriveFiles();
+            // Perform longer sync operations in the background, but guarantee UI load
+            try {
+                await fetchUserProfile(); 
+                if(state.googleDriveSignedIn) {
+                    await loadStateFromDrive(); 
+                    await syncDriveFiles();
+                }
+            } catch (syncErr) {
+                 console.error("Background Drive sync failed during startup:", syncErr);
+                 showToast("Failed to fully sync with Google Drive. Check logs.", "error");
+            } finally {
+                // GUARANTEE the overlay is hidden after sign-in attempt, regardless of sync success.
+                dom.loadingOverlay.classList.add('hidden');
+                updateDriveStatus(true);
             }
 
         } else {
@@ -135,11 +139,17 @@ async function tokenClientCallback(resp) {
     saveState(); // This securely stores the token in localStorage via script1.js
     showToast('Successfully connected to Google Drive!', 'success');
     
-    // Perform initial sync after successful login
-    await fetchUserProfile(); 
-    await loadStateFromDrive();
-    await syncDriveFiles(); 
-    updateDriveStatus(true);
+    // Perform initial sync after successful login, handling any internal sync failures gracefully
+    try {
+        await fetchUserProfile(); 
+        await loadStateFromDrive();
+        await syncDriveFiles(); 
+    } catch (syncError) {
+        console.error("Post-Auth Sync Failed:", syncError);
+        showToast("Drive connection successful, but background sync failed.", "error");
+    } finally {
+        updateDriveStatus(true);
+    }
 }
 
 function handleAuthClick() {
