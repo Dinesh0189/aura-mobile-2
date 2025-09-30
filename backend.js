@@ -9,6 +9,8 @@ const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/drive.readonly https://ww
 const SETTINGS_FILE_NAME = 'aura_settings.json';
 let settingsFileId = null;
 let tokenClient;
+// Initialization guard flag to prevent duplicate execution (common issue with duplicate <script> tags)
+let isGapiInitAttempted = false; 
 
 // IMPORTANT: Ensure your main HTML file includes these scripts:
 // <script async defer src="https://apis.google.com/js/api.js" onload="onGoogleApiLoad()"></script>
@@ -30,6 +32,14 @@ function handleApiError(err, contextMessage) {
 
 
 function onGoogleApiLoad() {
+  // === Initialization Guard ===
+  // Prevents multiple executions if the onload handler is called more than once.
+  if (isGapiInitAttempted) {
+    console.warn("GAPI initialization already attempted. Ignoring duplicate call.");
+    return;
+  }
+  isGapiInitAttempted = true; // Mark attempt
+  
   // Check if gapi is loaded before proceeding
   if (typeof gapi === 'undefined') {
     console.error("FATAL: Google API library (gapi) failed to load.");
