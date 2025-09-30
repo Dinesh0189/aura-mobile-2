@@ -42,8 +42,15 @@ function onGoogleApiLoad() {
   
   // Check if gapi is loaded before proceeding
   if (typeof gapi === 'undefined') {
-    console.error("FATAL: Google API library (gapi) failed to load.");
-    showToast("Google API library failed to load. Check network and script tags.", "error");
+    console.error("FATAL: Google API library (gapi) failed to load. The application will continue in local-only mode.");
+    showToast("Google API library failed to load. Drive features disabled.", "error");
+    
+    // CRITICAL FIX: Hide loading overlay if GAPI is missing, preventing a hang.
+    // The 'dom' object is assumed to be defined in script1.js and globally accessible.
+    if (typeof dom !== 'undefined' && dom.loadingOverlay) {
+        dom.loadingOverlay.classList.add('hidden');
+    }
+    
     return;
   }
   gapi.load('client', initializeGapiClient);
