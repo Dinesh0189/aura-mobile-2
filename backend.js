@@ -1,7 +1,7 @@
 // --- SCRIPT 4: GOOGLE DRIVE BACKEND INTEGRATION (FULLY UPDATED) ---
 
 const GOOGLE_API_KEY = 'AIzaSyCddqKGS8YXxkxcqmoFlshfJHGAf6nIwiA'; // Replace with your actual API key
-const GOOGLE_CLIENT_ID = '531468994431-jvsf83j9hjpfqi2i8bkbnj08phr9sdmu.apps.googleusercontent.com'; // Replace with your actual Client ID
+const GOOGLE_CLIENT_ID = '531468994431-jvsf83j9hjpfqi2i8bkbnj08phf9sdmu.apps.googleusercontent.com'; // Replace with your actual Client ID
 
 const GOOGLE_DISCOVERY_DOCS = ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"];
 const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/drive.file';
@@ -9,6 +9,11 @@ const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/drive.readonly https://ww
 const SETTINGS_FILE_NAME = 'aura_settings.json';
 let settingsFileId = null;
 let tokenClient;
+
+// IMPORTANT: Ensure your main HTML file includes these scripts:
+// <script async defer src="https://apis.google.com/js/api.js" onload="onGoogleApiLoad()"></script>
+// <script async defer src="https://accounts.google.com/gsi/client"></script>
+
 
 // Centralized error handler for all Google API calls
 function handleApiError(err, contextMessage) {
@@ -25,25 +30,29 @@ function handleApiError(err, contextMessage) {
 
 
 function onGoogleApiLoad() {
+  // Check if gapi is loaded before proceeding
+  if (typeof gapi === 'undefined') {
+    console.error("FATAL: Google API library (gapi) failed to load.");
+    showToast("Google API library failed to load. Check network and script tags.", "error");
+    return;
+  }
   gapi.load('client', initializeGapiClient);
 }
 
 async function initializeGapiClient() {
     try {
-        if (GOOGLE_API_KEY === 'YOUR_API_KEY' || GOOGLE_CLIENT_ID === 'YOUR_CLIENT_ID') {
-            showToast("API Credentials missing in backend.js", "error");
-            console.error("FATAL: Please replace placeholder API Key and Client ID in backend.js");
-            state.googleApiReady = true; 
-            updateDriveStatus(false);
-            dom.loadingOverlay.classList.add('hidden'); // Hide loading screen
-            return;
-        }
-
+        // Initialize gapi.client
         await gapi.client.init({
           apiKey: GOOGLE_API_KEY,
           discoveryDocs: GOOGLE_DISCOVERY_DOCS,
         });
         
+        // Check if Google Identity Services (GIS) is loaded before initializing tokenClient
+        if (typeof google === 'undefined' || typeof google.accounts === 'undefined' || typeof google.accounts.oauth2 === 'undefined') {
+             throw new Error("Google Identity Services library (accounts.oauth2) is not loaded.");
+        }
+
+        // Initialize GIS Token Client
         tokenClient = google.accounts.oauth2.initTokenClient({
             client_id: GOOGLE_CLIENT_ID,
             scope: GOOGLE_SCOPES,
@@ -83,8 +92,13 @@ async function initializeGapiClient() {
 
     } catch (err) {
         console.error("Fatal error during GAPI initialization:", err);
-        showToast("Could not connect to Google services.", "error");
-        // Ensure overlay is hidden on any error
+        // The common error is caught here. We use the error message from the throw or a generic one.
+        const errorMessage = err.message.includes('loaded') ? err.message : "Could not connect to Google services. Check API Key and Console setup.";
+        showToast(errorMessage, "error");
+
+        // Ensure state is clean and overlay is hidden on any error
+        state.googleApiReady = true; 
+        updateDriveStatus(false);
         if (dom.loadingOverlay && !dom.loadingOverlay.classList.contains('hidden')) {
             dom.loadingOverlay.classList.add('hidden');
         }
@@ -202,8 +216,11 @@ async function loadStateFromDrive() {
         state.ytHistory = savedState.ytHistory || [];
         state.settings = { ...state.settings, ...savedState.settings };
         
+        // Merge Drive tracks with existing non-Drive tracks
         const nonDriveTracks = state.library.filter(t => t.source !== 'drive');
         state.library = [...(savedState.library || []), ...nonDriveTracks];
+        
+        // Deduplicate the library based on ID
         state.library = state.library.filter((track, index, self) => 
             index === self.findIndex((t) => (t.id === track.id))
         );
@@ -225,6 +242,7 @@ async function saveStateToDrive() {
     const fileId = await getAppDataFileId();
 
     const stateToSave = {
+        // Only save cloud tracks (Drive and YouTube metadata)
         library: state.library.filter(track => track.source !== 'local'),
         playlists: state.playlists,
         recents: state.recents,
@@ -308,14 +326,21 @@ async function uploadTrackToDrive(track) {
 
     const metadata = { 'name': track.name, 'mimeType': track.file.type || 'audio/mpeg', 'parents': ['root'] };
     const reader = new FileReader();
+    
+    // Use readAsArrayBuffer for potentially large files, but for gapi.client.request multipart,
+    // using readAsDataURL and base64 is often the path taken by quick examples.
+    // We will stick to readAsDataURL as implemented, but acknowledge it's only suitable for small files.
     reader.onload = async (e) => {
-        const fileContent = e.target.result;
+        const fileContentBase64 = e.target.result.split(',')[1];
         const boundary = '-------314159265358979323846';
         const delimiter = `\r\n--${boundary}\r\n`;
         const close_delim = `\r\n--${boundary}--`;
+        
+        // The file content must be base64-encoded and the transfer encoding header must be present.
         const multipartRequestBody =
             delimiter + 'Content-Type: application/json; charset=UTF-8\r\n\r\n' + JSON.stringify(metadata) +
-            delimiter + 'Content-Type: ' + metadata.mimeType + '\r\n' + 'Content-Transfer-Encoding: base64\r\n\r\n' + fileContent.split(',')[1] + 
+            delimiter + 'Content-Type: ' + metadata.mimeType + '\r\n' + 
+            'Content-Transfer-Encoding: base64\r\n\r\n' + fileContentBase64 + 
             close_delim;
 
         try {
@@ -342,6 +367,17 @@ async function uploadTrackToDrive(track) {
     reader.readAsDataURL(track.file);
 }
 
+// Utility to convert base64 to ArrayBuffer for download processing (if needed for blob creation)
+function base64ToArrayBuffer(base64) {
+    const binaryString = window.atob(base64);
+    const len = binaryString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes.buffer;
+}
+
 async function downloadTrackFromCloud(track) {
     if (!state.googleDriveSignedIn && track.source === 'drive') {
         showToast("Please connect to Google Drive to download.", "error");
@@ -353,11 +389,14 @@ async function downloadTrackFromCloud(track) {
         
         if (track.source === 'drive') {
             const accessToken = gapi.client.getToken().access_token;
+            // Fetch the file content
             const response = await fetch(`https://www.googleapis.com/drive/v3/files/${track.id}?alt=media`, {
                 headers: { 'Authorization': `Bearer ${accessToken}` }
             });
             if (!response.ok) throw new Error(`Download failed: ${response.statusText}`);
             const blob = await response.blob();
+            
+            // Create a temporary link and trigger download
             a.href = URL.createObjectURL(blob);
             a.download = track.name;
             document.body.appendChild(a);
@@ -365,7 +404,16 @@ async function downloadTrackFromCloud(track) {
             document.body.removeChild(a);
             URL.revokeObjectURL(a.href);
         } else if (track.source === 'youtube') {
+            // Note: ytdl is assumed to be an external library loaded via script tags
             const videoId = track.id.replace('yt-', '');
+            // This is a placeholder since ytdl does not run in a browser environment directly.
+            // For a real app, this would require a backend proxy to process the download.
+            // I'm retaining the original logic but adding a warning.
+            
+            showToast("YouTube downloads are not directly supported in the browser. Use a dedicated tool.", "error");
+            throw new Error("YouTube download functionality requires a backend proxy.");
+            
+            /* ORIGINAL CODE (likely broken without a proxy)
             const info = await ytdl.getInfo(videoId);
             const format = ytdl.chooseFormat(info.formats, { quality: 'highestaudio', filter: 'audioonly' });
             
@@ -377,10 +425,15 @@ async function downloadTrackFromCloud(track) {
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
+            */
+            
         } else {
             throw new Error("Track source is not downloadable from cloud.");
         }
-        showToast('Download started!', 'success');
+        // Only show success for Drive downloads
+        if (track.source === 'drive') {
+            showToast('Download started!', 'success');
+        }
     } catch(err) {
         console.error(`Download track failed:`, err);
         showToast(`Download failed: ${err.message}`, "error");
