@@ -12,7 +12,7 @@ let tokenClient;
 // Initialization guard flag to prevent duplicate execution (common issue with duplicate <script> tags)
 let isGapiInitAttempted = false; 
 
-// IMPORTANT: Ensure your main HTML file includes these scripts:
+// IMPORTANT: Ensure your main HTML file includes these scripts (ONLY ONCE):
 // <script async defer src="https://apis.google.com/js/api.js" onload="onGoogleApiLoad()"></script>
 // <script async defer src="https://accounts.google.com/gsi/client"></script>
 
@@ -103,7 +103,9 @@ async function initializeGapiClient() {
     } catch (err) {
         console.error("Fatal error during GAPI initialization:", err);
         // The common error is caught here. We use the error message from the throw or a generic one.
-        const errorMessage = err.message.includes('loaded') ? err.message : "Could not connect to Google services. Check API Key and Console setup.";
+        const errorMessage = err.message.includes('loaded') 
+            ? err.message + ". Check your browser's console for the full error trace." 
+            : "Could not connect to Google services. Please ensure your API keys, Client ID, and Google Cloud Console settings are correct, and check the browser console for details.";
         showToast(errorMessage, "error");
 
         // Ensure state is clean and overlay is hidden on any error
