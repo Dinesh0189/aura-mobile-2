@@ -1,7 +1,7 @@
-// --- SCRIPT 4: GOOGLE DRIVE BACKEND INTEGRATION (Mobile-Ready) ---
+// --- SCRIPT 4: GOOGLE DRIVE BACKEND INTEGRATION (FULLY UPDATED) ---
 
-const GOOGLE_API_KEY = 'AIzaSyCddqKGS8YXxkxcqmoFlshfJHGAf6nIwiA';
-const GOOGLE_CLIENT_ID = '531468994431-jvsf83j9hjpfqi2i8bkbnj08phr9sdmu.apps.googleusercontent.com';
+const GOOGLE_API_KEY = 'AIzaSyCddqKGS8YXxkxcqmoFlshfJHGAf6nIwiA'; // Replace with your actual API key
+const GOOGLE_CLIENT_ID = '531468994431-jvsf83j9hjpfqi2i8bkbnj08phr9sdmu.apps.googleusercontent.com'; // Replace with your actual Client ID
 
 const GOOGLE_DISCOVERY_DOCS = ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"];
 const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/drive.file';
@@ -10,35 +10,38 @@ const SETTINGS_FILE_NAME = 'aura_settings.json';
 let settingsFileId = null;
 let tokenClient;
 
+// Centralized error handler for all Google API calls
 function handleApiError(err, contextMessage) {
     console.error(`${contextMessage}:`, err);
+    // Check for 401 Unauthorized or equivalent errors
     if (err.status === 401 || (err.result && err.result.error && err.result.error.status === 'UNAUTHENTICATED')) {
         handleSignoutClick();
-        showToast("Session expired. Please connect again.", "error");
+        showToast("Your session has expired. Please connect again.", "error");
     } else {
         const message = err.result?.error?.message || err.message || 'An unknown API error occurred.';
         showToast(`${contextMessage} failed: ${message}`, "error");
     }
 }
 
+
 function onGoogleApiLoad() {
-    gapi.load('client', initializeGapiClient);
+  gapi.load('client', initializeGapiClient);
 }
 
 async function initializeGapiClient() {
     try {
-        if (GOOGLE_API_KEY.includes('YOUR_API_KEY') || GOOGLE_CLIENT_ID.includes('YOUR_CLIENT_ID')) {
-            showToast("API Credentials missing", "error");
+        if (GOOGLE_API_KEY === 'YOUR_API_KEY' || GOOGLE_CLIENT_ID === 'YOUR_CLIENT_ID') {
+            showToast("API Credentials missing in backend.js", "error");
             console.error("FATAL: Please replace placeholder API Key and Client ID in backend.js");
             state.googleApiReady = true; 
             updateDriveStatus(false);
-            dom.loadingOverlay.classList.add('hidden');
+            dom.loadingOverlay.classList.add('hidden'); // Hide loading screen
             return;
         }
 
         await gapi.client.init({
-            apiKey: GOOGLE_API_KEY,
-            discoveryDocs: GOOGLE_DISCOVERY_DOCS,
+          apiKey: GOOGLE_API_KEY,
+          discoveryDocs: GOOGLE_DISCOVERY_DOCS,
         });
         
         tokenClient = google.accounts.oauth2.initTokenClient({
@@ -54,27 +57,34 @@ async function initializeGapiClient() {
         state.googleApiReady = true;
         console.log("Google API Client Initialized.");
 
+        // This is the main token restoration flow on app load
         if (state.googleAuthToken !== null) {
             gapi.client.setToken(state.googleAuthToken);
             state.googleDriveSignedIn = true;
             console.log("Restored token from localStorage.");
             
+            // Show UI immediately
             dom.loadingOverlay.classList.add('hidden');
             updateDriveStatus(true);
             
+            // Perform longer sync operations in the background
             await fetchUserProfile(); 
             
             if(state.googleDriveSignedIn) {
                 await loadStateFromDrive(); 
                 await syncDriveFiles();
             }
+
         } else {
+            // If not signed in, just hide the overlay and show the app
             updateDriveStatus(false);
             dom.loadingOverlay.classList.add('hidden');
         }
+
     } catch (err) {
         console.error("Fatal error during GAPI initialization:", err);
         showToast("Could not connect to Google services.", "error");
+        // Ensure overlay is hidden on any error
         if (dom.loadingOverlay && !dom.loadingOverlay.classList.contains('hidden')) {
             dom.loadingOverlay.classList.add('hidden');
         }
@@ -88,10 +98,11 @@ async function tokenClientCallback(resp) {
         return;
     }
     state.googleDriveSignedIn = true;
-    state.googleAuthToken = gapi.client.getToken();
-    saveState();
-    showToast('Connected to Google Drive!', 'success');
+    state.googleAuthToken = gapi.client.getToken(); // Get the new token
+    saveState(); // This securely stores the token in localStorage via script1.js
+    showToast('Successfully connected to Google Drive!', 'success');
     
+    // Perform initial sync after successful login
     await fetchUserProfile(); 
     await loadStateFromDrive();
     await syncDriveFiles(); 
@@ -112,6 +123,7 @@ function handleSignoutClick() {
         google.accounts.oauth2.revoke(token.access_token, () => {});
         gapi.client.setToken('');
     }
+    // Clear all session-related state
     state.googleDriveSignedIn = false;
     state.googleAuthToken = null;
     settingsFileId = null;
@@ -119,12 +131,13 @@ function handleSignoutClick() {
     state.googleUserEmail = '';
     state.googleUserPicture = '';
     
+    // Reset library to only local/YT tracks
     state.library = state.library.filter(track => track.source === 'local' || track.source === 'youtube');
     state.playlists = { 'Liked Songs': { name: 'Liked Songs', tracks: [] } };
     state.ytHistory = [];
     state.recents = [];
     
-    saveState();
+    saveState(); // Persist the signed-out state to localStorage
     renderCurrentView();
     showToast('Disconnected from Google Drive.', 'info');
     updateDriveStatus(false);
@@ -170,15 +183,18 @@ async function getAppDataFileId() {
 
 async function loadStateFromDrive() {
     if (!state.googleDriveSignedIn) return;
-    showToast("Syncing settings...", "info");
+    showToast("Syncing your settings...", "info");
     const fileId = await getAppDataFileId();
     if (!fileId) {
-        console.log("No settings on Drive. Creating new file.");
+        console.log("No settings file found on Drive. Creating one with current state.");
         await saveStateToDrive();
         return;
     }
     try {
-        const response = await gapi.client.drive.files.get({ fileId: fileId, alt: 'media' });
+        const response = await gapi.client.drive.files.get({
+            fileId: fileId,
+            alt: 'media'
+        });
         const savedState = JSON.parse(response.body);
         
         state.playlists = savedState.playlists || { 'Liked Songs': { name: 'Liked Songs', tracks: [] } };
@@ -194,10 +210,10 @@ async function loadStateFromDrive() {
 
         showToast("Settings and playlists synced!", "success");
         applyTheme(state.settings.activeTheme);
-        applyThemeCustomizations();
+        applyThemeCustomizations(); // Re-apply custom theme settings after loading
         await renderCurrentView();
-        if (dom.recentsList) renderRecents();
-        if (dom.playlistsList) renderPlaylists();
+        renderRecents();
+        renderPlaylists();
 
     } catch (err) {
         handleApiError(err, "Loading state from Drive");
@@ -231,7 +247,9 @@ async function saveStateToDrive() {
 
     try {
         const response = await gapi.client.request({
-            'path': path, 'method': method, 'params': { 'uploadType': 'multipart' },
+            'path': path,
+            'method': method,
+            'params': { 'uploadType': 'multipart' },
             'headers': { 'Content-Type': `multipart/related; boundary="${boundary}"` },
             'body': multipartRequestBody
         });
@@ -246,7 +264,7 @@ async function saveStateToDrive() {
 // --- MUSIC FILE SYNC, UPLOAD, AND DOWNLOAD ---
 async function syncDriveFiles() {
     if(!state.googleDriveSignedIn) return;
-    showToast('Syncing music from Drive...', 'info');
+    showToast('Syncing music from Google Drive...', 'info');
     try {
         const response = await gapi.client.drive.files.list({
             'pageSize': 200,
@@ -261,20 +279,23 @@ async function syncDriveFiles() {
             const newTracks = driveFiles
                 .filter(file => !existingDriveIds.has(file.id))
                 .map(file => ({
-                    name: file.name, id: file.id, source: 'drive',
-                    artist: 'Google Drive', thumbnail: file.thumbnailLink,
+                    name: file.name,
+                    id: file.id,
+                    source: 'drive',
+                    artist: 'Google Drive',
+                    thumbnail: file.thumbnailLink,
                 }));
 
             if (newTracks.length > 0) {
                 state.library.push(...newTracks);
                 if(state.currentView === 'home') renderTrackList();
-                showToast(`Found ${newTracks.length} new song(s) in Drive!`, 'success');
+                showToast(`Found ${newTracks.length} new song(s) in your Drive!`, 'success');
                 await saveStateToDrive();
             } else {
-                showToast('Cloud library is up to date.', 'info');
+                showToast('Your cloud music library is up to date.', 'info');
             }
         } else {
-            showToast('No music found in your Google Drive.', 'info');
+            showToast('No music files found in your Google Drive.', 'info');
         }
     } catch (err) {
         handleApiError(err, "Syncing Drive files");
@@ -282,18 +303,54 @@ async function syncDriveFiles() {
 }
 
 async function uploadTrackToDrive(track) {
-    // This is a desktop-only feature, so we'll just show a message on mobile.
-    showToast("Uploading is best done on the desktop version.", "info");
+    if (!track.file || !state.googleDriveSignedIn) return;
+    showToast(`Uploading "${track.name}"...`, 'info');
+
+    const metadata = { 'name': track.name, 'mimeType': track.file.type || 'audio/mpeg', 'parents': ['root'] };
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+        const fileContent = e.target.result;
+        const boundary = '-------314159265358979323846';
+        const delimiter = `\r\n--${boundary}\r\n`;
+        const close_delim = `\r\n--${boundary}--`;
+        const multipartRequestBody =
+            delimiter + 'Content-Type: application/json; charset=UTF-8\r\n\r\n' + JSON.stringify(metadata) +
+            delimiter + 'Content-Type: ' + metadata.mimeType + '\r\n' + 'Content-Transfer-Encoding: base64\r\n\r\n' + fileContent.split(',')[1] + 
+            close_delim;
+
+        try {
+            const response = await gapi.client.request({
+                'path': '/upload/drive/v3/files', 'method': 'POST', 'params': { 'uploadType': 'multipart' },
+                'headers': { 'Content-Type': `multipart/related; boundary="${boundary}"` }, 'body': multipartRequestBody
+            });
+            
+            const uploadedTrackIndex = state.library.findIndex(t => t.id === track.id);
+            if (uploadedTrackIndex > -1) {
+                state.library[uploadedTrackIndex].id = response.result.id;
+                state.library[uploadedTrackIndex].source = 'drive';
+                state.library[uploadedTrackIndex].artist = 'Google Drive';
+                delete state.library[uploadedTrackIndex].file; 
+            }
+            
+            await renderTrackList();
+            await saveStateToDrive();
+            showToast(`"${track.name}" uploaded successfully!`, 'success');
+        } catch (err) {
+            handleApiError(err, "Uploading track");
+        }
+    };
+    reader.readAsDataURL(track.file);
 }
 
 async function downloadTrackFromCloud(track) {
     if (!state.googleDriveSignedIn && track.source === 'drive') {
-        showToast("Connect to Google Drive to download.", "error");
+        showToast("Please connect to Google Drive to download.", "error");
         return;
     }
-    showToast(`Preparing download for "${track.name}"...`, 'info');
+    showToast(`Preparing to download "${track.name}"...`, 'info');
     try {
         const a = document.createElement('a');
+        
         if (track.source === 'drive') {
             const accessToken = gapi.client.getToken().access_token;
             const response = await fetch(`https://www.googleapis.com/drive/v3/files/${track.id}?alt=media`, {
@@ -311,14 +368,17 @@ async function downloadTrackFromCloud(track) {
             const videoId = track.id.replace('yt-', '');
             const info = await ytdl.getInfo(videoId);
             const format = ytdl.chooseFormat(info.formats, { quality: 'highestaudio', filter: 'audioonly' });
-            if (!format || !format.url) throw new Error("No audio format found.");
+            
+            if (!format || !format.url) {
+                throw new Error("No suitable audio format found for download.");
+            }
             a.href = format.url;
             a.download = `${info.videoDetails.title.replace(/[\\/:"*?<>|]/g, '')}.mp3`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
         } else {
-            throw new Error("Track source is not downloadable.");
+            throw new Error("Track source is not downloadable from cloud.");
         }
         showToast('Download started!', 'success');
     } catch(err) {
@@ -326,6 +386,3 @@ async function downloadTrackFromCloud(track) {
         showToast(`Download failed: ${err.message}`, "error");
     }
 }
-
-
-
